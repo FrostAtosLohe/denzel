@@ -4,17 +4,22 @@ const helmet = require('helmet');
 const {PORT} = require('./constants');
 const nodemon = require('nodemon');
 const db = require("./initialize");
-const name = "imdb";
-const collectionName = "movies";
-const app = express();
 const url = require('url')
+const mongoose = require('mongoose');
 var express_graphql = require('express-graphql');
 var { buildSchema } = require('graphql');
 const imdb = require('./imdb');
+const { makeExecutableSchema } = require('graphql-tools');
+const app = express();
+
+const name = "imdb";
+const collectionName = "movies";
 const DENZEL_IMDB_ID = 'nm0000243';
 const METASCORE = 77;
+const Schema = mongoose.Schema;
 
 module.exports = app;
+
 
 app.use(require('body-parser').json());
 app.use(cors());
@@ -96,6 +101,57 @@ db.initialize(name, collectionName, function(collection) {
       response.json(result);
     });
   });
+
+//GraphQL
+var schema = buildSchema(`
+
+type Query {
+  movies: [Movie]
+  moviesid(id: String!): [Movie]
+  search(limit : Int!, metascore: Int!): [Movie]
+},
+type Movie {
+  _id : Int
+  link: String
+  id : String
+  metascore: Int
+  poster : String
+  rating : Int
+  synopsis: String
+  title: String
+  votes: Int
+  year: Int
+}
+`);
+
+var fetchid = function(args){
+	var temp = args.id
+	var res = collection.find({ $query: {id: temp} }).toArray();
+	return res;
+}
+var searchmovie = function(args){
+	var res = collection.aggregate([{ $match: {metascore: {$gte: args.metascore}}},{ $sort: { metascore: -1}},{ $limit: args.limit }]).toArray();
+	return res;
+}
+var save = async function(args){
+	collection.updateOne({"id" : args.id} ,{'$set': {"review":args.review, "date":args.date}})
+	var res = await collection.find({ $query: {id: args.id} }).toArray();
+	console.log(res)
+	return res;
+}
+
+const root = {
+  movies:()=> collection.aggregate([{ $match: { metascore:{ $gte:70} } },{ $sample: { size: 1 } }]).toArray(),
+  moviesid:fetchid,
+  search:searchmovie,
+  datereview:save
+}
+
+app.use('/graphql', express_graphql({
+    schema: schema,
+    rootValue: root,
+    graphiql: true
+}));
 
 }, function(err) {throw (err);});
 
